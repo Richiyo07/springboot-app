@@ -1,46 +1,149 @@
 pipeline {
     agent any
 
-    environment {
-        registry = "211223789150.dkr.ecr.us-east-1.amazonaws.com/my-docker-repo"
+    tools {
+        maven 'maven3'
     }
-    
+
+    environment {
+        AWS_REGION = 'us-east-2'
+        ECR_REGISTRY = '136356824322.dkr.ecr.us-east-2.amazonaws.com'
+        IMAGE_NAME = 'mykubectl/dodo-repo'
+        IMAGE_TAG = 'latest'
+        EKS_CLUSTER = 'demo-eks'
+    }
+
     stages {
-        stage('Checkout') {
+
+        stage('Cloning Git') {
             steps {
-                checkout scmGit(branches: [[name: '*/main']], extensions: [], userRemoteConfigs: [[url: 'https://github.com/akannan1087/springboot-app']])
+                checkout scmGit(
+                    branches: [[name: '*/main']],
+                    extensions: [],
+                    userRemoteConfigs: [[
+                        url: 'https://github.com/akannan1087/springboot-app'
+                    ]]
+                )
             }
         }
-        
-        stage ("build Jar") {
+
+        stage('Build') {
             steps {
-                sh "mvn clean install"
+                sh 'mvn clean install'
             }
         }
-        
-        stage ("Build image") {
+
+        stage('Building image') {
             steps {
-                script {
-                    docker.build registry
-                }
+                sh '''
+                    set -e
+
+                    docker build \
+                        -t ${ECR_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG} \
+                        .
+                '''
             }
         }
-        
-        stage ("Push to ECR") {
+
+        stage('Pushing to ECR') {
             steps {
-                sh "aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin 211223789150.dkr.ecr.us-east-1.amazonaws.com"
-                sh "docker push 211223789150.dkr.ecr.us-east-1.amazonaws.com/my-docker-repo:latest"
-                
+                sh '''
+                    set -e
+
+                    echo "Logging into ECR..."
+
+                    aws ecr get-login-password \
+                        --region ${AWS_REGION} | \
+                    docker login \
+                        --username AWS \
+                        --password-stdin ${ECR_REGISTRY}
+
+                    echo "Pushing Docker image..."
+
+                    docker push \
+                        ${ECR_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}
+                '''
             }
         }
-        
-        stage ("Deploy to K8S") {
+
+        stage('Configure EKS') {
             steps {
-                withKubeConfig(caCertificate: '', clusterName: '', contextName: '', credentialsId: 'K8S', namespace: '', restrictKubeConfigAccess: false, serverUrl: '') {
-                sh "kubectl apply -f eks-deploy-k8s.yaml"
-                    
-                }
+                sh '''
+                    set -e
+
+                    echo "====================================="
+                    echo "Checking AWS identity"
+                    echo "====================================="
+
+                    aws sts get-caller-identity
+
+                    echo "====================================="
+                    echo "Checking EKS cluster"
+                    echo "====================================="
+
+                    aws eks describe-cluster \
+                        --region ${AWS_REGION} \
+                        --name ${EKS_CLUSTER} \
+                        --query 'cluster.{status:status,endpoint:endpoint}' \
+                        --output table
+
+                    echo "====================================="
+                    echo "Updating kubeconfig"
+                    echo "====================================="
+
+                    aws eks update-kubeconfig \
+                        --region ${AWS_REGION} \
+                        --name ${EKS_CLUSTER}
+
+                    echo "====================================="
+                    echo "Kubernetes context"
+                    echo "====================================="
+
+                    kubectl config current-context
+
+                    echo "====================================="
+                    echo "Testing Kubernetes connection"
+                    echo "====================================="
+
+                    kubectl get nodes
+                '''
             }
+        }
+
+        stage('K8S Deploy') {
+            steps {
+                sh '''
+                    set -e
+
+                    echo "====================================="
+                    echo "Deploying application"
+                    echo "====================================="
+
+                    kubectl apply -f eks-deploy-k8s.yaml
+
+                    echo "====================================="
+                    echo "Deployment status"
+                    echo "====================================="
+
+                    kubectl get deployments
+
+                    echo "====================================="
+                    echo "Pod status"
+                    echo "====================================="
+
+                    kubectl get pods -o wide
+                '''
+            }
+        }
+    }
+
+    post {
+        success {
+            echo 'Pipeline completed successfully!'
+        }
+
+        failure {
+            echo 'Pipeline failed!'
         }
     }
 }
