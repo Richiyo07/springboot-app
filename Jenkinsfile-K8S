@@ -1,52 +1,111 @@
-
 pipeline {
-   tools {
+    agent any
+
+    tools {
         maven 'maven3'
     }
-    agent any
+
     environment {
-        registry = " 136356824322.dkr.ecr.us-east-2.amazonaws.com/yohyoh/kubectl-repo:latest"
+        AWS_REGION = 'us-east-2'
+        ECR_REGISTRY = '136356824322.dkr.ecr.us-east-2.amazonaws.com'
+        IMAGE_NAME = 'yohyoh/kubectl-repo'
+        IMAGE_TAG = 'latest'
+        EKS_CLUSTER = 'demo-eks'
     }
-   
+
     stages {
+
         stage('Cloning Git') {
             steps {
-                checkout([$class: 'GitSCM', branches: [[name: '*/main']], doGenerateSubmoduleConfigurations: false, extensions: [], submoduleCfg: [], userRemoteConfigs: [[credentialsId: '', url: 'https://github.com/akannan1087/springboot-app']]])     
+                checkout scmGit(
+                    branches: [[name: '*/main']],
+                    extensions: [],
+                    userRemoteConfigs: [[
+                        url: 'https://github.com/Richiyo07/springboot-app'
+                    ]]
+                )
             }
         }
 
-      stage ('Build') {
-          steps {
-            sh 'mvn clean install'           
+        stage('Build') {
+            steps {
+                sh 'mvn clean install'
             }
-      }
-    // Building Docker images
-    stage('Building image') {
-      steps{
-        script {
-          dockerImage = docker.build registry 
         }
-      }
-    }
-   
-    // Uploading Docker images into AWS ECR
-    stage('Pushing to ECR') {
-     steps{  
-         script {
-                sh 'aws ecr get-login-password --region us-east-2 | docker login --username AWS --password-stdin 136356824322.dkr.ecr.us-east-2.amazonaws.com'
-                sh 'docker push 136356824322.dkr.ecr.us-east-2.amazonaws.com/yohyoh/kubectl-repo:latest'
-         }
-        }
-      }
 
-       stage('K8S Deploy') {
-        steps{   
-            script {
-                withKubeConfig([credentialsId: 'K8S', serverUrl: '']) {
-                sh ('kubectl apply -f  eks-deploy-k8s.yaml')
-                }
+        stage('Building image') {
+            steps {
+                sh '''
+                    docker build \
+                        -t ${ECR_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG} \
+                        .
+                '''
             }
         }
-       }
+
+        stage('Pushing to ECR') {
+            steps {
+                sh '''
+                    set -e
+
+                    echo "Logging into AWS ECR..."
+
+                    aws ecr get-login-password \
+                        --region ${AWS_REGION} | \
+                    docker login \
+                        --username AWS \
+                        --password-stdin ${ECR_REGISTRY}
+
+                    echo "Pushing image..."
+
+                    docker push \
+                        ${ECR_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}
+                '''
+            }
+        }
+
+        stage('Configure EKS') {
+            steps {
+                sh '''
+                    set -e
+
+                    echo "Updating kubeconfig..."
+
+                    aws eks update-kubeconfig \
+                        --region ${AWS_REGION} \
+                        --name ${EKS_CLUSTER}
+
+                    echo "Testing Kubernetes connection..."
+
+                    kubectl config current-context
+                    kubectl get nodes
+                '''
+            }
+        }
+
+        stage('k8S Deploy') {
+            steps {
+                sh '''
+                    set -e
+
+                    echo "Deploying application..."
+
+                    kubectl apply -f eks-deploy-k8s.yaml
+
+                    echo "Deployment status:"
+                    kubectl get deployments
+
+                    echo "Pod status:"
+                    kubectl get pods -o wide
+                '''
+            }
+        }
     }
-}
+
+    post {
+        success {
+            echo 'Pipeline completed successfully!'
+        }
+
+        failure {
+            echo 'Pipeline failed!'
