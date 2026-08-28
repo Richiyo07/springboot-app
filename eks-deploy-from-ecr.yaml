@@ -14,7 +14,7 @@ spec:
     spec:
       containers:
       - name: my-springboot-app
-        image: 136356824322.dkr.ecr.us-east-2.amazonaws.com/mykubectl/dodo-repo:latest
+        image: 136356824322.dkr.ecr.us-east-2.amazonaws.com/richspace/dodo-repo:latest
         imagePullPolicy: Always
         ports:
         - containerPort: 8085
