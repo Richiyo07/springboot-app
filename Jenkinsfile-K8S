@@ -1,55 +1,51 @@
-pipeline { 
-    agent any 
-    
-    tools { 
-        maven 'maven3' 
-    } 
-    
-    environment { 
-        // Defined without the tag here for cleaner string manipulation
-        REGISTRY_BASE = "136356824322.dkr.ecr.us-east-2.amazonaws.com/yohyoh/kubectl-repo" 
-    } 
-    
-    stages { 
-        stage('Cloning Git') { 
-            steps { 
-                checkout scmGit(branches: [[name: '*/main']], extensions: [], userRemoteConfigs: [[url: 'https://github.com/Richiyo07/springboot-app']])                  
-            } 
-        } 
-          
-        stage ('Build') { 
-            steps { 
-                sh 'mvn clean install'                        
-            } 
-        } 
-        
-        stage('Building image') { 
-            steps { 
-                script { 
-                    // Jenkins Docker plugin automatically appends the tag passed in argument
-                    dockerImage = docker.build("${env.REGISTRY_BASE}", "-f Dockerfile .")  
-                } 
-            } 
-        } 
-         
-        stage('Pushing to ECR') { 
-            steps {             
-                script { 
-                    sh 'aws ecr get-login-password --region us-east-2 | docker login --username AWS --password-stdin 136356824322.dkr.ecr.us-east-2.amazonaws.com'   
-                    // Uses the plugin's built-in push method to handle the image push seamlessly
-                    dockerImage.push('latest')
-                } 
-            } 
-        } 
-         
-        stage('K8S Deploy') { 
-            steps {                 
-                script { 
-                    withKubeConfig([credentialsId: '9b3d8386-a745-4f48-ac89-97729af53ecd', serverUrl: '']) { 
-                        sh 'kubectl apply -f eks-deploy-k8s.yaml' 
-                    } 
-                } 
-            } 
-        } 
-    } 
+pipeline {
+   tools {
+        maven 'maven3'
+    }
+    agent any
+    environment {
+        registry = "136356824322.dkr.ecr.us-east-2.amazonaws.com/richspace/dodo-repo:latest"
+    }
+   
+    stages {
+        stage('Cloning Git') {
+            steps {
+                checkout scmGit(branches: [[name: '*/main']], extensions: [], userRemoteConfigs: [[url: 'https://github.com/Richiyo07/springboot-app']])     
+            }
+        }
+      stage ('Build') {
+          steps {
+            sh 'mvn clean install'           
+            }
+      }
+    // Building Docker images
+    stage('Building image') {
+      steps{
+        script {
+          dockerImage = docker.build registry 
+        }
+      }
+    }
+   
+    // Uploading Docker images into AWS ECR
+    stage('Pushing to ECR') {
+     steps{  
+         script {
+                sh 'aws ecr get-login-password --region us-east-2 | docker login --username AWS --password-stdin 136356824322.dkr.ecr.us-east-2.amazonaws.com'
+                sh 'docker push 136356824322.dkr.ecr.us-east-2.amazonaws.com/richspace/dodo-repo:latest'
+         }
+        }
+      }
+
+       stage('K8S Deploy') {
+        steps{   
+            script {
+                withKubeConfig([credentialsId: 'dodo', serverUrl: '']) {
+                sh ('kubectl apply -f  eks-deploy-k8s.yaml')
+                }
+            }
+        }
+       }
+    }
 }
+
