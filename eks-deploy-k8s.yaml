@@ -1,9 +1,10 @@
+```yaml
 apiVersion: apps/v1
 kind: Deployment
 metadata:
+  name: springboot-app
   labels:
     app: springboot-app
-  name: springboot-app
 spec:
   replicas: 4
   selector:
@@ -15,28 +16,26 @@ spec:
         app: springboot-app
     spec:
       containers:
-      - name: my-springboot-app
-        image: 136356824322.dkr.ecr.us-east-2.amazonaws.com/mykubectl/dodo-repo:latest
-        imagePullPolicy: Always
-        ports:
-        - containerPort: 8085
-          name: http
-          protocol: TCP
-# service type loadbalancer       
+        - name: my-springboot-app
+          image: 136356824322.dkr.ecr.us-east-2.amazonaws.com/richspace/dodo-repo:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8085
+              name: http
+              protocol: TCP
+
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  labels:
-    app: springboot-app
-    k8s-app: springboot-app
   name: springboot-app
 spec:
-  ports:
-  - name: http
-    port: 80
-    protocol: TCP
-    targetPort: 8085
   type: LoadBalancer
   selector:
     app: springboot-app
+  ports:
+    - name: http
+      protocol: TCP
+      port: 80
+      targetPort: 8085
+```
